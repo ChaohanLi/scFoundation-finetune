@@ -161,3 +161,18 @@ cython_debug/
 
 .DS_store
 **/*.DS_store/
+# downstream finetuning outputs
+celltype/outputs/
+celltype/output/
+celltype/runs/
+celltype/wandb/
+
+# checkpoints
+*.pt
+*.pth
+*.ckpt
+
+# python cache
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
