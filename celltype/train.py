@@ -28,6 +28,7 @@ from torch import nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from sklearn.metrics import f1_score, accuracy_score
+import wandb
 
 _CELLTYPE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _CELLTYPE_DIR)
@@ -55,6 +56,9 @@ def parse_args():
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--output_dir", type=str, default="outputs")
     p.add_argument("--run_name",   type=str, default=None)
+    # ── Weights & Biases ──────────────────────────────────────────────────
+    p.add_argument("--wandb_project", type=str, default="scfoundation-celltype")
+    p.add_argument("--no_wandb",  action="store_true", help="Disable wandb logging")
     return p.parse_args()
 
 
@@ -137,6 +141,15 @@ def main():
         device     = device,
     )
 
+    # ── Weights & Biases init ─────────────────────────────────────────────
+    if not args.no_wandb:
+        wandb.login(key=args.wandb_key)
+        wandb.init(
+            project = args.wandb_project,
+            name    = run_name,
+            config  = vars(args),
+        )
+
     # ── Loss: standard cross-entropy ─────────────────────────────────────
     criterion = nn.CrossEntropyLoss()
 
@@ -180,6 +193,18 @@ def main():
             f.write(f"{epoch},{tr_loss:.6f},{tr_f1:.6f},{tr_acc:.6f},"
                     f"{val_loss:.6f},{val_f1:.6f},{val_acc:.6f}\n")
 
+        if not args.no_wandb:
+            wandb.log({
+                "epoch":          epoch,
+                "train/loss":     tr_loss,
+                "train/macro_f1": tr_f1,
+                "train/accuracy": tr_acc,
+                "val/loss":       val_loss,
+                "val/macro_f1":   val_f1,
+                "val/accuracy":   val_acc,
+                "lr":             scheduler.get_last_lr()[0],
+            }, step=epoch)
+
         # Save best model
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1
@@ -199,6 +224,9 @@ def main():
     print(f"Training complete. Best val macro-F1: {best_val_f1:.4f}  (acc reported per epoch)")
     print(f"Metrics saved to:  {metrics_path}")
     print("=" * 60)
+
+    if not args.no_wandb:
+        wandb.finish()
 
 
 if __name__ == "__main__":
