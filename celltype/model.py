@@ -72,12 +72,6 @@ class CellTypeClassifier(nn.Module):
             for _, p in self.pos_emb.named_parameters():
                 p.requires_grad = False
 
-        # Print trainable parameter count
-        total  = sum(p.numel() for p in self.parameters())
-        train_ = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        print(f"Parameters: {total:,} total | {train_:,} trainable "
-              f"({100*train_/total:.1f}%)")
-
         hidden_dim = model_config["encoder"]["hidden_dim"]
         # ── Classification head ───────────────────────────────────────────
         # Source: scFoundation/model/finetune_model.py
@@ -89,9 +83,15 @@ class CellTypeClassifier(nn.Module):
             nn.ReLU(),
             nn.Linear(256, self.n_class),
         )
+
+        # Print trainable parameter count after all modules are attached.
+        total  = sum(p.numel() for p in self.parameters())
+        train_ = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print(f"Parameters: {total:,} total | {train_:,} trainable "
+              f"({100*train_/total:.1f}%)")
         self._built = True
 
-    def forward(self, sample_list: dict) -> torch.Tensor:
+    def encode(self, sample_list: dict) -> torch.Tensor:
         """
         Parameters
         ----------
@@ -99,7 +99,7 @@ class CellTypeClassifier(nn.Module):
 
         Returns
         -------
-        logits : (B, n_class)
+        embeddings : (B, hidden_dim)
         """
         assert self._built, "Call model.build() before forward()"
         x = sample_list["x"]            # (B, 19264)
@@ -123,6 +123,19 @@ class CellTypeClassifier(nn.Module):
         # Aggregate: max-pool over gene tokens
         x, _ = torch.max(x, dim=1)       # (B, hidden_dim)
         x = self.norm(x)
+        return x
+
+    def forward(self, sample_list: dict) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        sample_list : dict with key 'x' of shape (B, 19264)
+
+        Returns
+        -------
+        logits : (B, n_class)
+        """
+        x = self.encode(sample_list)
         logits = self.head(x)             # (B, n_class)
         return logits
 

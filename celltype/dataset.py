@@ -83,6 +83,59 @@ def _stratified_train_val_split(
     return barcodes[train_idx], barcodes[val_idx]
 
 
+def _stratified_train_val_test_split(
+    barcodes: np.ndarray,
+    labels: np.ndarray,
+    train_size: float = 0.8,
+    val_size: float = 0.1,
+    random_state: int = 42,
+):
+    """
+    Deterministic stratified train/val/test split.
+
+    The default 0.8/0.1/0.1 split matches the evaluation protocol used by
+    read_nt_v3 while keeping at least one held-out sample per class when the
+    class has enough cells.
+    """
+    if not 0.0 < train_size < 1.0:
+        raise ValueError(f"train_size must be in (0, 1), got {train_size}")
+    if not 0.0 <= val_size < 1.0:
+        raise ValueError(f"val_size must be in [0, 1), got {val_size}")
+    if train_size + val_size >= 1.0:
+        raise ValueError("train_size + val_size must be < 1.0")
+
+    barcodes = np.asarray(barcodes)
+    labels = np.asarray(labels)
+    rng = np.random.default_rng(int(random_state))
+    train_parts, val_parts, test_parts = [], [], []
+
+    for lab in np.unique(labels):
+        idx = np.flatnonzero(labels == lab)
+        perm = rng.permutation(idx)
+        n = len(perm)
+
+        if n < 3:
+            n_tr = 1 if n >= 2 else n
+            n_val = n - n_tr
+        else:
+            n_tr = int(np.floor(n * train_size))
+            n_val = int(np.floor(n * val_size))
+            n_tr = min(max(n_tr, 1), n - 2)
+            n_val = min(max(n_val, 1), n - n_tr - 1)
+
+        train_parts.append(perm[:n_tr])
+        val_parts.append(perm[n_tr:n_tr + n_val])
+        test_parts.append(perm[n_tr + n_val:])
+
+    train_idx = np.concatenate(train_parts)
+    val_idx = np.concatenate(val_parts)
+    test_idx = np.concatenate(test_parts)
+    rng.shuffle(train_idx)
+    rng.shuffle(val_idx)
+    rng.shuffle(test_idx)
+    return barcodes[train_idx], barcodes[val_idx], barcodes[test_idx]
+
+
 # ── PyTorch Dataset ────────────────────────────────────────────────────────
 class CellTypeDataset(Dataset):
     """Single-cell gene expression dataset for scFoundation classifier."""
@@ -104,14 +157,17 @@ def load_data(
     h5ad_path:       str   = H5AD_PATH,
     gene_index_path: str   = GENE_INDEX_PATH,
     train_size:      float = 0.8,
+    val_size:        float = 0.1,
     random_state:    int   = 42,
     batch_size:      int   = 32,
     num_workers:     int   = 4,
+    return_test:     bool  = False,
 ):
     """
     Returns
     -------
     train_loader, val_loader : DataLoader
+    test_loader              : DataLoader (only when return_test=True)
     class_names              : list[str]  – sorted cell-type names
     type2idx                 : dict[str, int]
     class_weights            : np.ndarray (n_class,)  – inverse-frequency weights
@@ -145,19 +201,40 @@ def load_data(
     labels      = np.array([type2idx[t] for t in cell_types])
     barcodes    = np.array(adata.obs.index.tolist())
 
-    # ── 4. Stratified split (matches collaborator's datamodule) ───────────
-    train_bc, val_bc = _stratified_train_val_split(
-        barcodes, labels, train_size=train_size, random_state=random_state
-    )
+    # ── 4. Stratified split ───────────────────────────────────────────────
+    if return_test:
+        train_bc, val_bc, test_bc = _stratified_train_val_test_split(
+            barcodes,
+            labels,
+            train_size=train_size,
+            val_size=val_size,
+            random_state=random_state,
+        )
+    else:
+        train_bc, val_bc = _stratified_train_val_split(
+            barcodes, labels, train_size=train_size, random_state=random_state
+        )
+        test_bc = np.array([], dtype=barcodes.dtype)
+
     train_set = set(train_bc.tolist())
+    val_set = set(val_bc.tolist())
+    test_set = set(test_bc.tolist())
     train_mask = np.array([b in train_set for b in barcodes])
-    val_mask   = ~train_mask
+    val_mask = np.array([b in val_set for b in barcodes])
+    test_mask = np.array([b in test_set for b in barcodes])
+    if not return_test:
+        val_mask = ~train_mask
 
     X_arr = X_df.values.astype(np.float32)
     train_ds = CellTypeDataset(X_arr[train_mask], labels[train_mask])
     val_ds   = CellTypeDataset(X_arr[val_mask],   labels[val_mask])
+    test_ds  = CellTypeDataset(X_arr[test_mask],  labels[test_mask])
 
-    print(f"  Split: {train_mask.sum()} train / {val_mask.sum()} val")
+    if return_test:
+        print(f"  Split: {train_mask.sum()} train / {val_mask.sum()} val / "
+              f"{test_mask.sum()} test")
+    else:
+        print(f"  Split: {train_mask.sum()} train / {val_mask.sum()} val")
 
     # ── 5. Class weights (inverse frequency, returned for reference) ─────────
     train_labels  = labels[train_mask]
@@ -177,6 +254,14 @@ def load_data(
         val_ds, batch_size=batch_size, shuffle=False,
         num_workers=num_workers, pin_memory=True,
     )
+
+    if return_test:
+        test_loader = DataLoader(
+            test_ds, batch_size=batch_size, shuffle=False,
+            num_workers=num_workers, pin_memory=True,
+        )
+        return (train_loader, val_loader, test_loader,
+                class_names, type2idx, class_weights)
 
     return train_loader, val_loader, class_names, type2idx, class_weights
 
