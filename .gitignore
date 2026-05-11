@@ -181,3 +181,6 @@ __pycache__/
 prob/outputs_probe/
 prob/wandb/
 prob/__pycache__/
+
+# wandb local cache
+wandb/

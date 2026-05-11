@@ -1,46 +1,97 @@
-# Cell-Type Evaluation
+# scFoundation Probe
 
-This directory now has two evaluation paths:
+Frozen-encoder linear probe for **scFoundation** (100M params, 768-dim).  
+Extracts val-set embeddings, then evaluates a **LinearSVC** via 5-fold cross-validation.
 
-1. `train.py`: original supervised scFoundation fine-tuning. It trains the MLP
-   classification head with cross-entropy and selects the best checkpoint by
-   validation macro-F1.
-2. `probe.py`: unified embedding-probe evaluation. It extracts frozen
-   scFoundation validation cell embeddings and runs the same downstream
-   `LinearSVC` cross-validation protocol used by read_nt_v3.
+---
 
-## Unified Probe
+## Supported Datasets
 
-Default split is the original stratified `80% train / 20% val` split with
-`random_state=42`. The probe is run only on validation embeddings, matching
-`LatentSVCAccuracyCallback(mode=val)` in read_nt_v3:
+| `--dataset_id`   | h5ad path                                                 | Cells | Classes | Notes               |
+|------------------|-----------------------------------------------------------|-------|---------|---------------------|
+| `5w_symbol`      | `readData/5w_allcelltype_anno_symbol.h5ad`               | 50 k  | 29      | log1p normalized    |
+| `5w_GSE196830`   | `readData/5w_PBMC_GSE196830/5w_allcelltype.h5ad`         | 50 k  | 29      | raw counts → add `--preprocess` |
+| `GSE96583`       | `readData/GSE96583_PBMC/GSE96583_merged_dedup.h5ad`      | 41 k  | 8       | raw counts, gene-symbol var_names → add `--preprocess` |
+| `10w_GSE196830`  | `readData/10w_PBMC_GSE196830/10w_allcelltype.h5ad`       | 100 k | 29      | raw counts → add `--preprocess` |
+| `20w_GSE196830`  | `readData/20w_PBMC_GSE196830/20w_allcelltype.h5ad`       | 200 k | 29      | raw counts → add `--preprocess` |
 
-```text
-validation embeddings -> 5-fold StratifiedKFold
-each fold: StandardScaler -> PCA(100) -> LinearSVC(dual=False, max_iter=2000)
-```
+> **`--preprocess`**: applies `sc.pp.normalize_total(target_sum=1e4)` + `sc.pp.log1p()` before embedding extraction. Required for raw-count datasets.
 
-If a fold has more than 5000 training samples, the SVC fit set is subsampled
-to 5000 samples, matching the read_nt_v3 config.
+---
 
-Run:
+## Quick Start
+
+### Interactive (foreground)
 
 ```bash
-python celltype/probe.py \
-  --ckpt /lichaohan/scFoundation/model/models/models.ckpt \
-  --h5ad /lichaohan/readData/5w_allcelltype_anno_symbol.h5ad \
-  --gene_index /lichaohan/scFoundation/OS_scRNA_gene_index.19264.tsv \
-  --batch_size 12 \
-  --seed 42
+bash run_probe.sh
 ```
 
-Outputs are written under `celltype/outputs_probe/<run_name>/`:
+Edit `run_probe.sh` to select the dataset (uncomment the block you want).
 
-- `probe_metrics.json`: mean CV train/test accuracy, balanced accuracy,
-  macro-F1, weighted-F1, per-fold metrics, class filtering details, class names,
-  and run arguments.
-- `probe_fold_metrics.csv`: per-fold train/test accuracy and macro-F1.
-- `class_names.json`: label-id mapping.
+### Background (nohup)
 
-Use `--save_embeddings` to also save validation `.npy` embedding and label
-arrays.
+```bash
+nohup bash run_probe.sh > run_probe.log 2>&1 &
+tail -f run_probe.log
+```
+
+### Manual CLI
+
+```bash
+# Original log1p dataset
+python probe.py \
+    --h5ad /lichaohan/readData/5w_allcelltype_anno_symbol.h5ad \
+    --dataset_id 5w_symbol \
+    --n_class 29 \
+    --run_name my_run \
+    --wandb_project scfoundation-probe
+
+# Raw count dataset
+python probe.py \
+    --h5ad /lichaohan/readData/5w_PBMC_GSE196830/5w_allcelltype.h5ad \
+    --dataset_id 5w_GSE196830 \
+    --n_class 29 \
+    --preprocess \
+    --run_name my_run \
+    --wandb_project scfoundation-probe
+```
+
+---
+
+## Key Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--h5ad` | `5w_allcelltype_anno_symbol.h5ad` | Input h5ad path |
+| `--dataset_id` | `5w_symbol` | Tag appended to wandb run name |
+| `--n_class` | `29` | Expected number of cell types |
+| `--preprocess` | off | Normalize raw counts before embedding |
+| `--run_name` | auto timestamp | wandb / output folder name prefix |
+| `--wandb_project` | `scfoundation-probe` | wandb project name |
+| `--n_jobs` | `16` | CPU cores for parallel fold evaluation |
+| `--pca_dim` | `100` | PCA before SVC (applied to 768-dim embeddings) |
+| `--no_wandb` | off | Disable wandb logging |
+| `--save_embeddings` | off | Save embeddings as `.npz` in output dir |
+
+---
+
+## Protocol
+
+```
+val embeddings (768-dim)
+  └─ 5-fold StratifiedKFold (shuffle, seed=42)
+       └─ StandardScaler → PCA(100) → LinearSVC(dual=False, max_iter=2000)
+            folds are run in parallel (--n_jobs controls core count)
+            if >5000 train samples per fold → subsampled to 5000
+```
+
+---
+
+## Output
+
+Results are saved to `outputs_probe/<run_name>/`:
+- `cv_summary.json` — per-fold and aggregated metrics
+
+Metrics logged to wandb: `cv_macro_f1_mean`, `cv_macro_f1_std`, `cv_acc_mean`.
+

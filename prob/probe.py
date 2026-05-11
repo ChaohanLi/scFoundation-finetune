@@ -51,6 +51,9 @@ def parse_args():
                    default="/lichaohan/readData/5w_allcelltype_anno_symbol.h5ad")
     p.add_argument("--gene_index", type=str,
                    default="/lichaohan/scFoundation/OS_scRNA_gene_index.19264.tsv")
+    p.add_argument("--dataset_id", type=str, default="5w_symbol",
+                   help="Short dataset tag appended to run_name (e.g. 5w_symbol, "
+                        "5w_GSE196830, GSE96583, 10w_GSE196830, 20w_GSE196830)")
     p.add_argument("--n_class", type=int, default=29)
     p.add_argument("--batch_size", type=int, default=12)
     p.add_argument("--train_size", type=float, default=0.8)
@@ -65,7 +68,14 @@ def parse_args():
                         "remaining cores go to OvR binary SVMs.")
     p.add_argument("--no_frozenmore", action="store_true",
                    help="Also unfreeze token/pos embeddings before embedding extraction")
-    p.add_argument("--output_dir", type=str, default="outputs_probe")
+    p.add_argument("--preprocess", action="store_true",
+                   help="Apply normalize_total+log1p before processing (for raw count datasets)")
+    p.add_argument("--symbol_map", type=str,
+                   default="/lichaohan/readData/gene_id_to_symbol.tsv",
+                   help="TSV (gene_id, gene_symbol) used when h5ad lacks a gene_symbol column. "
+                        "Set to '' to disable.")
+    p.add_argument("--output_dir", type=str,
+                   default=os.path.join(_CELLTYPE_DIR, "outputs_probe"))
     p.add_argument("--run_name", type=str, default=None)
     p.add_argument("--save_embeddings", action="store_true")
     # ── Weights & Biases ───────────────────────────────────────────────
@@ -247,7 +257,8 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     run_name = args.run_name or time.strftime("probe_%Y%m%d_%H%M%S")
-    out_dir = os.path.join(_CELLTYPE_DIR, args.output_dir, run_name)
+    run_name = f"{run_name}_{args.dataset_id}"
+    out_dir = os.path.join(args.output_dir, run_name)
     os.makedirs(out_dir, exist_ok=True)
 
     print(f"Device: {device}")
@@ -268,6 +279,8 @@ def main():
         random_state=args.seed,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        preprocess=args.preprocess,
+        symbol_map=args.symbol_map or None,
     )
     n_class = len(class_names)
     assert n_class == args.n_class, (

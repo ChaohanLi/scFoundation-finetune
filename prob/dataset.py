@@ -162,6 +162,8 @@ def load_data(
     batch_size:      int   = 32,
     num_workers:     int   = 4,
     return_test:     bool  = False,
+    preprocess:      bool  = False,
+    symbol_map:      str   = None,
 ):
     """
     Returns
@@ -174,17 +176,34 @@ def load_data(
                                (returned for reference; standard CE is used in training)
     """
     import anndata as ad
+    import scanpy as sc
 
     print(f"Loading h5ad: {h5ad_path}")
     adata = ad.read_h5ad(h5ad_path)
     print(f"  Shape: {adata.shape}  obs columns: {list(adata.obs.columns)}")
 
+    # ── Optional preprocessing (normalize raw counts to log1p) ───────────
+    if preprocess:
+        print("  Preprocessing: normalize_total + log1p (raw counts → log1p)")
+        sc.pp.normalize_total(adata, target_sum=1e4)
+        sc.pp.log1p(adata)
+
     # ── 1. Build gene-symbol-indexed DataFrame ────────────────────────────
     X_raw = adata.X.toarray() if issparse(adata.X) else np.array(adata.X)
-    # var index is Ensembl; use gene_symbol as column name for alignment
+    # Resolve gene symbols: prefer explicit column, then symbol_map, then var_names
+    if "gene_symbol" in adata.var.columns:
+        gene_symbols = adata.var["gene_symbol"].values
+    elif symbol_map is not None:
+        sym_df = pd.read_csv(symbol_map, sep="\t", index_col=0)
+        gene_symbols = np.array([sym_df.loc[g, "gene_symbol"] if g in sym_df.index
+                                 else g for g in adata.var_names])
+        n_mapped = sum(1 for g in adata.var_names if g in sym_df.index)
+        print(f"  symbol_map: {n_mapped}/{len(adata.var_names)} Ensembl IDs resolved to symbols")
+    else:
+        gene_symbols = adata.var_names.values
     X_df  = pd.DataFrame(X_raw,
                          index=adata.obs.index,
-                         columns=adata.var["gene_symbol"].values)
+                         columns=gene_symbols)
 
     # ── 2. Align to scFoundation 19,264 gene order ────────────────────────
     gene_list_df = pd.read_csv(gene_index_path, sep="\t")
