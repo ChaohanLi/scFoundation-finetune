@@ -46,10 +46,12 @@ RUN_NAME="probe"                       # wandb run name prefix (dataset_id appen
 WANDB_PROJECT="scfoundation-probe"
 CKPT="/lichaohan/scFoundation/model/models/models.ckpt"
 GENE_INDEX="/lichaohan/scFoundation/OS_scRNA_gene_index.19264.tsv"
-BATCH_SIZE=8
+SYMBOL_MAP="/lichaohan/readData/gene_id_to_symbol.tsv"  # Ensembl→HGNC map for raw-count datasets
+BATCH_SIZE=4                           # use 4 for large datasets (200k cells) to avoid GPU OOM
 N_JOBS=16                              # parallel CPU cores (fold parallelism)
 PCA_DIM=100
 MAX_ITER=2000
+SAVE_EMBEDDINGS=""                     # set to "--save_embeddings" to also save embeddings_val.npy / labels_val.npy (needed for visualize.py)
 
 PYTHON="/lichaohan/miniconda3/envs/scvi/bin/python"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,6 +66,7 @@ $PYTHON probe.py \
     --n_class     "${N_CLASS}" \
     --ckpt        "${CKPT}" \
     --gene_index  "${GENE_INDEX}" \
+    --symbol_map  "${SYMBOL_MAP}" \
     --output_dir  "${OUTPUT_DIR}" \
     --run_name    "${RUN_NAME}" \
     --wandb_project "${WANDB_PROJECT}" \
@@ -71,4 +74,5 @@ $PYTHON probe.py \
     --n_jobs      "${N_JOBS}" \
     --pca_dim     "${PCA_DIM}" \
     --max_iter    "${MAX_ITER}" \
-    ${PREPROCESS}
+    ${PREPROCESS} \
+    ${SAVE_EMBEDDINGS}
