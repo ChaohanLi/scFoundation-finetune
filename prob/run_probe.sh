@@ -36,8 +36,14 @@ set -euo pipefail
 # PREPROCESS="--preprocess"
 
 # Dataset: 20w_GSE196830 (raw counts, 29 classes)
-H5AD="/lichaohan/readData/20w_PBMC_GSE196830/20w_allcelltype.h5ad"
-DATASET_ID="20w_GSE196830"
+# H5AD="/lichaohan/readData/20w_PBMC_GSE196830/20w_allcelltype.h5ad"
+# DATASET_ID="20w_GSE196830"
+# N_CLASS=29
+# PREPROCESS="--preprocess"
+
+# Dataset: 40w_GSE196830 (raw counts, 29 classes)
+H5AD="/lichaohan/readData/40w_PBMC_GSE196830/GSE196830_40w_subset.h5ad"
+DATASET_ID="40w_GSE196830"
 N_CLASS=29
 PREPROCESS="--preprocess"
 
@@ -47,7 +53,7 @@ WANDB_PROJECT="scfoundation-probe"
 CKPT="/lichaohan/scFoundation/model/models/models.ckpt"
 GENE_INDEX="/lichaohan/scFoundation/OS_scRNA_gene_index.19264.tsv"
 SYMBOL_MAP="/lichaohan/readData/gene_id_to_symbol.tsv"  # Ensembl→HGNC map for raw-count datasets
-BATCH_SIZE=4                           # use 4 for large datasets (200k cells) to avoid GPU OOM
+BATCH_SIZE=4                          # A100-80GB: 32 is safe; original 4 was for 16-24GB GPUs
 N_JOBS=16                              # parallel CPU cores (fold parallelism)
 PCA_DIM=100
 MAX_ITER=2000
